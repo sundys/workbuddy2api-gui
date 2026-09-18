@@ -5,10 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>WorkBuddy 网关控制台</title>
-    <script type="module" crossorigin src="/assets/index-BEIjNl4j.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DQPncp76.css">
+    <script type="module" crossorigin src="/assets/index-BlSwGOV-.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-L3ZGnQKz.css">
   </head>
   <body>
     <div id="root"></div>
+    <!-- 在 React 启动前应用持久化的主题，避免页面刷新时主题闪烁。 -->
+    <script>
+      ;(function () {
+        try {
+          var t = localStorage.getItem('wbgui-theme')
+          if (t !== 'light' && t !== 'dark') t = 'dark'
+        } catch (e) {
+          t = 'dark'
+        }
+        document.documentElement.setAttribute('data-theme', t)
+        document.documentElement.style.colorScheme = t
+      })()
+    </script>
   </body>
 </html>

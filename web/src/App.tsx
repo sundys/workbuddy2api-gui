@@ -4,6 +4,7 @@ import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { api, setUnauthorizedHandler } from './api'
 import type { SessionInfo } from './types'
 import { Alert, Spinner } from './ui'
+import ThemeToggle from './ThemeToggle'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import StatsPage from './pages/StatsPage'
@@ -70,11 +71,19 @@ export default function App() {
   }
 
   if (!session?.authenticated) {
-    return <Login info={session} banner={banner} onCloseBanner={() => setBanner(null)} onSuccess={refreshSession} />
+    return (
+      <>
+        <Login info={session} banner={banner} onCloseBanner={() => setBanner(null)} onSuccess={refreshSession} />
+        <ThemeToggle />
+      </>
+    )
   }
 
   return (
-    <Shell session={session} onLogout={handleLoggedOut} onSessionRefresh={refreshSession} />
+    <>
+      <Shell session={session} onLogout={handleLoggedOut} onSessionRefresh={refreshSession} />
+      <ThemeToggle />
+    </>
   )
 }
 

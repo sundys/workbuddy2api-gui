@@ -8,6 +8,19 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- 在 React 启动前应用持久化的主题，避免页面刷新时主题闪烁。 -->
+    <script>
+      ;(function () {
+        try {
+          var t = localStorage.getItem('wbgui-theme')
+          if (t !== 'light' && t !== 'dark') t = 'dark'
+        } catch (e) {
+          t = 'dark'
+        }
+        document.documentElement.setAttribute('data-theme', t)
+        document.documentElement.style.colorScheme = t
+      })()
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
