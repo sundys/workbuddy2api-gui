@@ -109,7 +109,7 @@ vi config.json            # 改 auth_dir / config_file / ui.password
 
 ### 方式三：直接拉取预构建镜像（无需本地编译）
 
-每次推送到 `master` 或打 `v*` 标签时，CI 会自动构建 **amd64 + arm64 双架构**镜像并发布到
+每次推送到 `master` 或打版本标签时，CI 会自动构建 **amd64 + arm64 双架构**镜像并发布到
 GitHub Container Registry（见 [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)）。
 服务器上不需要 Go / Node 工具链，`docker compose up -d` 即可（把 `OWNER` 换成你的 GitHub 用户名/组织名）：
 
@@ -132,16 +132,22 @@ services:
 echo "$CR_PAT" | docker login ghcr.io -u OWNER --password-stdin   # CR_PAT 是 GitHub Personal Access Token（需 read:packages）
 ```
 
-**发版流程**（本地有源码时；CI 打 tag 时的版本号推导规则完全相同）：
+**发版流程**（全自动，不需要本地 `gh` 命令）：
 
 ```bash
-git tag v1.2.1
-git push origin v1.2.1          # CI 自动构建并发布 :1.2.1 / :1.2 / :latest
+git tag 1.2.3
+git push origin 1.2.3
+# CI 自动：构建双架构镜像 → 发布到 ghcr → 创建 GitHub Release（含中文更新说明）
 ```
 
-> 注意：CI 里 `main.version` 直接取自 git tag；本地 `docker compose build` 时需先跑
-> `./build-version.sh`（把版本号写入 `.env`，见下方说明）。脚本在 tag 之后有新提交时
-> 会生成 `1.2.1+3.gabc1234` 这样的"未发布"版本号，便于区分当前构建不是正式版。
+> 标签名即为版本号（`1.2.3`，无需 `v` 前缀；`v1.2.3` 也兼容）。
+> 打标签后会同时产出镜像标签 `1.2.3` / `1.2` / `sha-<短哈希>`（若是默认分支还含 `latest`），
+> 并在 [Releases](../../releases) 页创建发布说明 —— 内容自动汇总上一标签到本次之间的提交，
+> 附带镜像拉取命令、架构与 digest。CI 里 `main.version` 与本地 `docker compose build`
+> 走的是同一套取值逻辑（[`build-version.sh`](build-version.sh) 从 `git describe --tags` 取值），
+> 二进制版本号与镜像标签不会不一致。
+> 本地构建时记得先跑 `./build-version.sh`（把版本号写入 `.env`，见下方说明）；
+> tag 之后有新提交时脚本会生成 `1.2.1+3.gabc1234` 这样的"未发布"版本号，便于区分非正式构建。
 
 ## 💾 配置持久化与数据备份
 
