@@ -78,8 +78,12 @@ cd workbuddy2api-gui
 # 按实际情况改两处：宿主机网关目录、面板口令
 vi docker-compose.yml
 
+# 生成版本号（写入 .env，供 compose 构建；不跑则版本号回退为 dev）
+./build-version.sh
 docker compose up -d --build
 ```
+
+> `.env` 是本地生成物（已在 `.gitignore` 中），不要提交。
 
 访问 `http://<服务器IP>:8787`，默认账号 `admin` / `workbuddy`（**请立即修改**）。
 
@@ -119,12 +123,25 @@ services:
     # ……其余 environment / ports / volumes 与本仓库 docker-compose.yml 完全相同
 ```
 
+镜像标签与源码 tag 保持一致（CI 和本地构建都用 [`build-version.sh`](build-version.sh)
+从 `git describe --tags` 取版本号，二进制内嵌的版本号与镜像标签不会出现不一致）。
 可用标签：`latest`（默认分支最新）、`1.2.3`（正式版本号，打 tag 触发）、`1.2`（major.minor）、
 `sha-<短哈希>`（精确到某次构建，便于回滚）。首次拉取私有仓库的镜像需要先登录：
 
 ```bash
 echo "$CR_PAT" | docker login ghcr.io -u OWNER --password-stdin   # CR_PAT 是 GitHub Personal Access Token（需 read:packages）
 ```
+
+**发版流程**（本地有源码时；CI 打 tag 时的版本号推导规则完全相同）：
+
+```bash
+git tag v1.2.1
+git push origin v1.2.1          # CI 自动构建并发布 :1.2.1 / :1.2 / :latest
+```
+
+> 注意：CI 里 `main.version` 直接取自 git tag；本地 `docker compose build` 时需先跑
+> `./build-version.sh`（把版本号写入 `.env`，见下方说明）。脚本在 tag 之后有新提交时
+> 会生成 `1.2.1+3.gabc1234` 这样的"未发布"版本号，便于区分当前构建不是正式版。
 
 ## 💾 配置持久化与数据备份
 

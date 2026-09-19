@@ -66,6 +66,12 @@ jobs:
             org.opencontainers.image.description=workbuddy2api 网关的 Web 管理面板
             org.opencontainers.image.licenses=Apache-2.0
 
+      - name: 计算 VERSION（复用本地 build-version.sh 的同一套规则）
+        id: version
+        run: |
+          chmod +x build-version.sh
+          echo "version=$(./build-version.sh -p)" >> "$GITHUB_OUTPUT"
+
       - name: 安装 QEMU（多架构模拟）
         uses: docker/setup-qemu-action@v3
 
@@ -89,9 +95,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            # 构建期注入版本号（main.version），与镜像标签保持一致；
-            # 非 tag 构建时 meta.version 为空，回退用提交哈希。
-            VERSION=${{ steps.meta.outputs.version || github.sha }}
+            # 构建期注入版本号（main.version）：tag 构建时与镜像标签一致，
+            # 无 tag 时回退为 dev。与本地 ./build-version.sh 用同一套 git describe 规则。
+            VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false   # 关闭后 manifest 列表更干净，旧版 docker pull 更友好

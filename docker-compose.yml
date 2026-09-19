@@ -3,15 +3,19 @@
 # 前置：workbuddy2api 网关已按官方方式部署（本项目假定 /root/workbuddy2api）。
 # 本面板与网关是两个独立服务，通过 HTTP API + 磁盘文件协作。
 #
-# 启动：docker compose up -d --build
+# 启动：./build-version.sh && docker compose up -d --build
+#       （脚本会把 git tag 版本号写入 .env，供下方 ${VERSION} 使用；没跑脚本时
+#        回退为 dev，二进制仍可用，只是版本号显示为 dev。）
 # 访问：http://<服务器IP>:8787  （默认账号 admin / workbuddy，请尽快修改）
+
+# 由 build-version.sh 生成（已 gitignore，不入库）
 
 services:
   wbgui:
     build:
       context: .
       args:
-        VERSION: "1.2.1"
+        VERSION: "${VERSION:-dev}"
     image: workbuddy2api-gui:latest
     container_name: workbuddy2api-gui
     restart: unless-stopped
