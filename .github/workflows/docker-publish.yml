@@ -202,6 +202,7 @@ jobs:
           VERSION="${{ needs.build.outputs.version }}"
           TAGS="${{ needs.build.outputs.tags }}"
           DIGEST="${{ needs.build.outputs.digest }}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
 
           {
             echo "body<<RELEASE_NOTES_EOF"
@@ -219,7 +220,7 @@ jobs:
             echo
             echo '```bash'
             echo "# 拉取本版本镜像（公开镜像无需登录）"
-            echo "docker pull ghcr.io/${GITHUB_REPOSITORY,,}:${VERSION}"
+            echo "docker pull ${IMAGE}:${VERSION}"
             echo
             echo "# 已部署：配置都在数据卷里，升级不丢数据"
             echo "docker compose pull && docker compose up -d"
@@ -237,7 +238,7 @@ jobs:
             echo "docker load -i workbuddy2api-gui-${VERSION}-arm64.tar   # ARM（如树莓派 / 鲲鹏）"
             echo
             echo "# 导入后镜像名带架构后缀，按需重打标签再用 compose 启动："
-            echo "docker tag ghcr.io/\${GITHUB_REPOSITORY,,}:${VERSION}-amd64 ghcr.io/\${GITHUB_REPOSITORY,,}:${VERSION}"
+            echo "docker tag ${IMAGE}:${VERSION}-amd64 ${IMAGE}:${VERSION}"
             echo '```'
             echo
             echo "> 导入的镜像是单架构的，不要跨架构启动；两台不同架构的机器分别导入对应文件。"
