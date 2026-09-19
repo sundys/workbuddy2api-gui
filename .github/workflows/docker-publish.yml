@@ -111,6 +111,46 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false   # 关闭后 manifest 列表更干净，旧版 docker pull 更友好
 
+      # 导出离线镜像包（docker save 格式，单架构一份 tar）。
+      # buildx 的多架构构建无法一次输出多个 docker tar，所以按架构各构建导出一次；
+      # 复用 build cache，第二次导出很快。产物供 release job 上传为附件。
+      - name: 导出离线镜像包（amd64）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: ${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}-amd64
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          provenance: false
+          outputs: type=docker,dest=workbuddy2api-gui-${{ steps.version.outputs.version }}-amd64.tar
+
+      - name: 导出离线镜像包（arm64）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: false
+          tags: ${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}-arm64
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          provenance: false
+          outputs: type=docker,dest=workbuddy2api-gui-${{ steps.version.outputs.version }}-arm64.tar
+
+      - name: 上传离线镜像包（供 release job 下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-images-${{ github.run_id }}
+          path: |
+            workbuddy2api-gui-*.tar
+          if-no-files-found: error
+          retention-days: 7
+
       - name: 记录镜像 digest
         id: digest
         run: echo "digest=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
@@ -188,6 +228,20 @@ jobs:
             echo "> 首次部署请先看 README 的「快速开始」与「配置持久化与数据备份」，"
             echo "> 确认 auths 目录、网关 config.json 与面板 data 目录已挂载到宿主机。"
             echo
+            echo "## 📥 离线镜像包（无网 / 内网部署）"
+            echo
+            echo "本 Release 附带两个架构的 docker 镜像 tar，无法访问 ghcr 时可直接导入："
+            echo
+            echo '```bash'
+            echo "docker load -i workbuddy2api-gui-${VERSION}-amd64.tar   # x86_64 服务器"
+            echo "docker load -i workbuddy2api-gui-${VERSION}-arm64.tar   # ARM（如树莓派 / 鲲鹏）"
+            echo
+            echo "# 导入后镜像名带架构后缀，按需重打标签再用 compose 启动："
+            echo "docker tag ghcr.io/\${GITHUB_REPOSITORY,,}:${VERSION}-amd64 ghcr.io/\${GITHUB_REPOSITORY,,}:${VERSION}"
+            echo '```'
+            echo
+            echo "> 导入的镜像是单架构的，不要跨架构启动；两台不同架构的机器分别导入对应文件。"
+            echo
             echo "## 📝 更新内容"
             echo
             echo "$LOG"
@@ -197,6 +251,31 @@ jobs:
             echo "RELEASE_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: 下载离线镜像包（从 build job 的 artifact）
+        uses: actions/download-artifact@v4
+        with:
+          name: offline-images-${{ github.run_id }}
+          path: ./offline
+        continue-on-error: true
+
+      - name: 校验离线镜像包
+        id: assets
+        run: |
+          if [[ -d ./offline ]]; then
+            # download-artifact v4 会把 artifact 里的文件平铺到 path 根目录。
+            mv ./offline/*.tar ./ 2>/dev/null || true
+          fi
+          echo "找到的离线镜像包："
+          ls -1 workbuddy2api-gui-*.tar 2>/dev/null || true
+          # 拼成软props接受的逗号分隔列表（含空格的路径需要整体引号）。
+          FILES=""
+          for f in workbuddy2api-gui-*.tar; do
+            [[ -f "$f" ]] || continue
+            if [[ -z "$FILES" ]]; then FILES="$f"; else FILES="$FILES,$f"; fi
+          done
+          echo "assets=$FILES" >> "$GITHUB_OUTPUT"
+          [[ -z "$FILES" ]] && echo "⚠ 未找到 tar（附件将为空，见上面日志）" || echo "✓ 将上传 $FILES"
+
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -204,6 +283,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body: ${{ steps.notes.outputs.body }}
+          # 离线镜像包：内网/无网环境可用 docker load 直接导入。
+          files: ${{ steps.assets.outputs.assets }}
           draft: false
           prerelease: false
           generate_release_notes: false
