@@ -39,6 +39,9 @@ services:
       WBGUI_BACKUP_DIR: "/data/backups"
       # 面板登录凭据的持久化文件：网页「修改密码」需要它（config.json 通常是只读挂载）。
       WBGUI_CREDENTIALS_FILE: "/data/credentials.json"
+      # 官方价格表持久化文件：「请求统计」页换算官方 API 花费用。
+      # 不设则只读内置默认值（DeepSeek），网页上编辑的价格无法保存。
+      WBGUI_PRICING_FILE: "/data/pricing.json"
       # 网关容器名：用于「系统」页查询状态与重启
       WBGUI_CONTAINER: "workbuddy2api"
       # 高危操作总开关：解禁「重启网关」「删除账号」「恢复配置备份」

@@ -103,6 +103,64 @@ vi config.json            # 改 auth_dir / config_file / ui.password
 
 > 前端未构建也能编译运行：此时后端照常工作，页面会显示"前端未构建"的引导提示。
 
+### 方式三：直接拉取预构建镜像（无需本地编译）
+
+每次推送到 `master` 或打 `v*` 标签时，CI 会自动构建 **amd64 + arm64 双架构**镜像并发布到
+GitHub Container Registry（见 [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)）。
+服务器上不需要 Go / Node 工具链，`docker compose up -d` 即可（把 `OWNER` 换成你的 GitHub 用户名/组织名）：
+
+```yaml
+services:
+  wbgui:
+    image: ghcr.io/OWNER/workbuddy2api-gui:latest   # 或锁定具体版本，如 :1.2.1
+    # 本地有源码时也可用 build: 就地构建，二者二选一即可
+    container_name: workbuddy2api-gui
+    restart: unless-stopped
+    # ……其余 environment / ports / volumes 与本仓库 docker-compose.yml 完全相同
+```
+
+可用标签：`latest`（默认分支最新）、`1.2.3`（正式版本号，打 tag 触发）、`1.2`（major.minor）、
+`sha-<短哈希>`（精确到某次构建，便于回滚）。首次拉取私有仓库的镜像需要先登录：
+
+```bash
+echo "$CR_PAT" | docker login ghcr.io -u OWNER --password-stdin   # CR_PAT 是 GitHub Personal Access Token（需 read:packages）
+```
+
+## 💾 配置持久化与数据备份
+
+面板是无状态服务 —— **所有状态都在挂载进容器的外部文件里**。只要挂载正确，容器随便重建、
+升级、换机器，配置和账号都不会丢。下面按"什么数据该放哪"逐一说明：
+
+| 数据 | 配置项 / 环境变量 | 必须持久化到宿主机吗 | 说明 |
+|---|---|---|---|
+| 网关账号凭证（`auths/*.json`） | `auth_dir` / `WBGUI_AUTH_DIR` | ✅ 必须 | 直接与网关共享同一目录，面板写、网关读 |
+| 网关配置 `config.json` | `config_file` / `WBGUI_CONFIG_FILE` | ✅ 必须 | 网关自身的数据，面板只做在线编辑 |
+| 面板登录凭据 | `credentials_file` / `WBGUI_CREDENTIALS_FILE` | ✅ 强烈建议 | 网页改密码后写这里；不配则改密码按钮禁用，重启后口令回到初始值 |
+| 配置备份 | `backup_dir` / `WBGUI_BACKUP_DIR` | ✅ 建议 | 保存配置前的自动备份（见下方 FAQ） |
+| 官方价格表 | `pricing_file` / `WBGUI_PRICING_FILE` | 💡 可选 | 统计页换算官方 API 花费用；不配则只读内置默认值 |
+| 面板自身配置 | `-config` 指向的文件 | 💡 可选 | 不用环境变量时才需要；通常直接用 `WBGUI_*` 更省事 |
+
+**部署要点**：
+
+1. **`/data` 目录一定要挂到宿主机**（compose 里是 `./data:/data`）。`credentials.json`、
+   `pricing.json`、`backups/` 都落在里面。不挂的话这些数据写在容器可写层，`docker compose down`
+   或镜像升级后就没了。
+2. **`config.json` 用单文件挂载时，备份会"自动搬家"**：单文件挂载的父目录属于容器可写层，
+   备份写那里会随容器消失，所以面板检测到这种情况会改写到 `backup_dir`。配置页会显示备份的
+   实际路径，以页面显示为准。
+3. **`config.json` 建议只读挂载（`:ro`）**：面板的"改密码"能力因此走独立的 `credentials_file`，
+   而不是去写回 `config.json`。这两份文件不要共用同一路径（字段不同，且面板会拒绝加载
+   误指过来的网关配置，启动直接报错而非带着错误配置跑起来）。
+4. **凭证文件属主要对上**：`WBGUI_AUTH_OWNER_UID` / `WBGUI_AUTH_OWNER_GID` 设为网关容器的运行用户
+   （官方网关镜像为 `10001`）。否则面板以 root 写出的 `0600` 凭证网关读不到 ——
+   表现是"账号已添加但池中未加载"，且重启网关也无效。查看方法：
+   `docker inspect <网关容器> --format '{{.Config.User}}'`。
+5. **升级镜像不丢数据**：`docker compose pull && docker compose up -d`。配置都在卷里，
+   镜像里只有编译好的二进制（连前端产物都 embed 进去了）。
+
+> 迁移 / 备份整机时，只要带上 `auths/`、网关 `config.json` 和面板的 `data/` 三样，
+> 就能在新机器上完整恢复。
+
 ## ⚙️ 配置说明
 
 完整字段见 [`config.example.json`](config.example.json)。
@@ -133,6 +191,7 @@ vi config.json            # 改 auth_dir / config_file / ui.password
 
 `WBGUI_LISTEN` · `WBGUI_GATEWAY_URL` · `WBGUI_GATEWAY_API_KEY` · `WBGUI_AUTH_DIR` ·
 `WBGUI_AUTH_OWNER_UID` · `WBGUI_AUTH_OWNER_GID` · `WBGUI_CONFIG_FILE` · `WBGUI_CREDENTIALS_FILE` ·
+`WBGUI_PRICING_FILE` ·
 `WBGUI_CONTAINER` · `WBGUI_USERNAME` · `WBGUI_PASSWORD` · `WBGUI_SESSION_TTL` ·
 `WBGUI_DANGEROUS_OPS`（bool） · `WBGUI_READ_ONLY`（bool） · `WBGUI_REFRESH_CONFIG_ON_LOGIN`（bool） ·
 `WBGUI_BACKUP_DIR` · `WBGUI_TIMEOUT_SECONDS`
