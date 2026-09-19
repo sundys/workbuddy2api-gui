@@ -1,8 +1,9 @@
-# WorkBuddy2API Web GUI —— 构建多架构镜像并发布到 GitHub Container Registry。
+# WorkBuddy2API Web GUI —— 构建多架构镜像并发布到 GitHub Container Registry，
+# 并在打标签时自动创建 GitHub Release（无需本地 gh 命令）。
 #
 # 触发条件：
 #   · 推送 master 分支（Dockerfile / 前端 / 后端 / go.mod 变更时才构建）
-#   · 推送 v* 形式的 tag（如 v1.2.3），产出正式版本号镜像
+#   · 推送版本标签（如 1.2.3 或 v1.2.3），产出正式版本号镜像 + 自动发布 Release
 #   · 手动触发（Actions 页面 → Run workflow）
 #
 # 产物（均为 linux/amd64 + linux/arm64 双架构）：
@@ -11,6 +12,9 @@
 #   ghcr.io/<owner>/<repo>:1.2               ← tag 时，major.minor
 #   ghcr.io/<owner>/<repo>:sha-<短哈希>      ← 每次构建，用于精确回滚
 #
+# 发版方式（不再需要 gh 命令）：
+#   git tag 1.2.3 && git push origin 1.2.3
+#
 # ghcr 镜像名必须全小写，仓库名含大写字母时下面会自动转小写。
 
 name: docker-publish
@@ -18,7 +22,7 @@ name: docker-publish
 on:
   push:
     branches: [master]
-    tags: ['v*']
+    tags: ['v*', '[0-9]*']   # 1.2.3 与 v1.2.3 两种风格都接受
     paths:
       - 'Dockerfile'
       - 'docker-compose.yml'
@@ -43,6 +47,10 @@ jobs:
     permissions:
       contents: read
       packages: write   # 推送 ghcr 需要的写权限
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tags: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.digest.outputs.digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -86,6 +94,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 构建并推送（amd64 + arm64）
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -102,9 +111,101 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false   # 关闭后 manifest 列表更干净，旧版 docker pull 更友好
 
+      - name: 记录镜像 digest
+        id: digest
+        run: echo "digest=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
       - name: 打印产物清单
         run: |
           echo "本次构建的镜像标签："
           echo "${{ steps.meta.outputs.tags }}" | tr '\n' ' '
           echo
           echo "架构：linux/amd64, linux/arm64"
+
+  # ── 发布 GitHub Release（仅在打版本标签时运行）──────────────────
+  # 需要写权限：contents: write 才能创建 Release。
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write   # 创建 / 更新 Release
+    steps:
+      - name: 检出代码（含完整历史，用于生成更新记录）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 生成发布说明
+        id: notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # 取上一个标签（按创建时间倒序的第二个），没有则列出全部提交。
+          PREV=$(git tag --sort=-creatordate | grep -v "^${TAG}$" | head -n 1 || true)
+          if [[ -n "$PREV" ]]; then
+            echo "上一版本标签：$PREV"
+            RANGE="${PREV}..HEAD"
+          else
+            echo "未找到更早的标签，列出全部提交"
+            RANGE=""
+          fi
+
+          # 提交记录去掉 merge 提交，一行一条。
+          if [[ -n "$RANGE" ]]; then
+            LOG=$(git log --no-merges --pretty=format:"- %s" "$RANGE")
+          else
+            LOG=$(git log --no-merges --pretty=format:"- %s")
+          fi
+          [[ -z "$LOG" ]] && LOG="-（未采集到提交记录）"
+
+          VERSION="${{ needs.build.outputs.version }}"
+          TAGS="${{ needs.build.outputs.tags }}"
+          DIGEST="${{ needs.build.outputs.digest }}"
+
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            echo "## 📦 Docker 镜像"
+            echo
+            echo "\`\`\`"
+            echo "$TAGS" | sed 's/^/docker pull /'
+            echo "\`\`\`"
+            echo
+            echo "- 架构：\`linux/amd64\`、\`linux/arm64\`"
+            echo "- 镜像 digest：\`${DIGEST}\`（内容固定指纹，跨架构引用同一份）"
+            echo "- 二进制内置版本号：\`${VERSION}\`"
+            echo
+            echo "## 🚀 升级 / 首次部署"
+            echo
+            echo '```bash'
+            echo "# 拉取本版本镜像（公开镜像无需登录）"
+            echo "docker pull ghcr.io/${GITHUB_REPOSITORY,,}:${VERSION}"
+            echo
+            echo "# 已部署：配置都在数据卷里，升级不丢数据"
+            echo "docker compose pull && docker compose up -d"
+            echo '```'
+            echo
+            echo "> 首次部署请先看 README 的「快速开始」与「配置持久化与数据备份」，"
+            echo "> 确认 auths 目录、网关 config.json 与面板 data 目录已挂载到宿主机。"
+            echo
+            echo "## 📝 更新内容"
+            echo
+            echo "$LOG"
+            echo
+            echo "---"
+            echo "完整改动历史：[\`$(git rev-parse --short HEAD)\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # tag 名即版本名；标签已存在，此处只发布 Release，不会再建标签。
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
